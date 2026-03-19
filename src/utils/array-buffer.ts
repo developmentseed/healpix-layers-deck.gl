@@ -32,12 +32,18 @@ export function expandArrayBuffer<T extends ArrayBufferView>(
   vertexPerCell: number,
   dimension: number
 ): T {
-  // @ts-expect-error - this is a bit hacky but it works for both our arrays.
+  // @ts-expect-error - this disables type checking for the length property.
   const len = cellBuffer.length;
+  const entries = len / dimension;
+  if (!Number.isInteger(entries)) {
+    throw new Error(
+      'expandArrayBuffer: cellBuffer length must be divisible by dimension'
+    );
+  }
   const Ctor = cellBuffer.constructor as any as { new (n: number): T };
-  const expanded = new Ctor(len * vertexPerCell * dimension);
+  const expanded = new Ctor(len * vertexPerCell);
 
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i < entries; i++) {
     const srcOffset = i * dimension;
     for (let v = 0; v < vertexPerCell; v++) {
       const dstOffset = (i * vertexPerCell + v) * dimension;
