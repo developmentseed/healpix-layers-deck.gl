@@ -13,8 +13,16 @@ export type HealpixCellsLayerProps = {
   /** Numbering scheme. */
   scheme: HealpixScheme;
   /**
-   * Per-cell fill color as a Float32Array of RGBA values normalised 0-1.
-   * Length must equal cellIds.length * 4.
+   * Per-frame per-cell fill colors.
+   *
+   * Each frame is an RGBA byte array (`0-255`) and must be
+   * `cellIds.length * 4` long.
    */
-  getFillColor: Float32Array;
+  colorFrames: Uint8Array[];
+  /**
+   * Frame index to render from `colorFrames`.
+   *
+   * The layer clamps this value to `[0, colorFrames.length - 1]`.
+   */
+  currentFrame: number;
 } & CompositeLayerProps;

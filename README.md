@@ -15,19 +15,43 @@ Peer dependencies (`@deck.gl/core`, `@deck.gl/layers`) must be provided by the h
 ```ts
 import { HealpixCellsLayer } from 'healpix-layers-deck.gl';
 
+const cellIds = new Int32Array([0, 1, 2, 3]);
+
+// Each frame is one RGBA color per cell in uint8 format (0-255).
+const frame0 = new Uint8Array([
+  255, 0, 0, 255,   // cell 0
+  0, 255, 0, 255,   // cell 1
+  0, 0, 255, 255,   // cell 2
+  255, 255, 0, 255  // cell 3
+]);
+
+const frame1 = new Uint8Array([
+  255, 255, 255, 255,
+  255, 128, 0, 255,
+  128, 0, 255, 255,
+  0, 255, 255, 255
+]);
+
 const layer = new HealpixCellsLayer({
   id: 'healpix',
   nside: 64,
-  cellIds: new Int32Array([0, 1, 2, 3]),
+  cellIds,
   scheme: 'nest',
-  getFillColor: new Float32Array([
-    1, 0, 0, 1,   // cell 0 — red
-    0, 1, 0, 1,   // cell 1 — green
-    0, 0, 1, 1,   // cell 2 — blue
-    1, 1, 0, 1,   // cell 3 — yellow
-  ]),
+  colorFrames: [frame0, frame1],
+  currentFrame: 0
 });
 ```
+
+### Animation Model
+
+`HealpixCellsLayer` uploads all provided frames into a single GPU texture:
+
+- texture **width** = `cellIds.length`
+- texture **height** = `colorFrames.length`
+- each texel = one `RGBA` color for one `(cell, frame)` pair
+
+At render time, the layer only changes `currentFrame`, and the shader samples
+the corresponding row from the texture.
 
 ## API
 
@@ -40,7 +64,8 @@ A `CompositeLayer` that renders HEALPix cells as filled polygons.
 | `nside` | `number` | `0` | HEALPix resolution parameter (must be a power of 2). |
 | `cellIds` | `Int32Array` | `Int32Array(0)` | HEALPix cell indices to render. |
 | `scheme` | `'nest' \| 'ring'` | `'nest'` | Pixel numbering scheme. |
-| `getFillColor` | `Float32Array` | `Float32Array(0)` | Per-cell RGBA colors normalised to 0–1. Length must equal `cellIds.length * 4`. |
+| `colorFrames` | `Uint8Array[]` | `[]` | Color animation frames. Each frame must be `cellIds.length * 4` in RGBA byte order (`0-255`). |
+| `currentFrame` | `number` | `0` | Frame index to render. Values are clamped into valid range. |
 
 All standard deck.gl `CompositeLayer` props (e.g. `visible`, `opacity`, `pickable`) are also accepted.
 
