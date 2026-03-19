@@ -12,6 +12,7 @@
  *   concurrently.
  */
 
+import { getWorkerFactory } from '../config';
 import { WorkerPool } from '../utils/worker-pool';
 import { hashInt32Array } from '../utils/hash';
 import type { GeometryResult, WorkerMessage, WorkerTask } from './types';
@@ -20,14 +21,19 @@ import type { HealpixScheme } from '../types/layer-props';
 const POOL_THRESHOLD = 10_000;
 const MAX_WORKERS = Math.min(navigator.hardwareConcurrency ?? 4, 8);
 
-const geometryPool = new WorkerPool<WorkerTask, WorkerMessage, GeometryResult>({
-  createWorker: () =>
-    new Worker(new URL('../workers/tile-grid.worker.ts', import.meta.url), {
-      type: 'module'
-    }),
-  maxConcurrent: MAX_WORKERS,
-  getResult: (e) => (e.data.type === 'data' ? e.data.data : undefined)
-});
+let geometryPool: WorkerPool<WorkerTask, WorkerMessage, GeometryResult> | null =
+  null;
+
+function getPool(): WorkerPool<WorkerTask, WorkerMessage, GeometryResult> {
+  if (!geometryPool) {
+    geometryPool = new WorkerPool<WorkerTask, WorkerMessage, GeometryResult>({
+      createWorker: () => getWorkerFactory()(),
+      maxConcurrent: MAX_WORKERS,
+      getResult: (e) => (e.data.type === 'data' ? e.data.data : undefined)
+    });
+  }
+  return geometryPool;
+}
 
 const MAX_CACHE_ENTRIES = 512;
 const geometryCache = new Map<string, GeometryResult>();
@@ -82,7 +88,7 @@ async function computeUncached(
   scheme: HealpixScheme
 ): Promise<GeometryResult> {
   if (cellIds.length < POOL_THRESHOLD) {
-    const [result] = await geometryPool.run([{ nside, cellIds, scheme }]);
+    const [result] = await getPool().run([{ nside, cellIds, scheme }]);
     return result;
   }
 
@@ -96,7 +102,7 @@ async function computeUncached(
     });
   }
 
-  const results = await geometryPool.run(tasks);
+  const results = await getPool().run(tasks);
 
   const totalCells = cellIds.length;
   const coords = new Float32Array(totalCells * 10);
