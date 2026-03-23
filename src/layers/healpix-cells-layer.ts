@@ -24,7 +24,7 @@ import { HEALPIX_COLOR_FRAMES_EXTENSION } from '../extensions/healpix-color-fram
 /** Internal prop subset used by default prop declarations. */
 type _HealpixCellsLayerProps = {
   nside: number;
-  cellIds: Int32Array;
+  cellIds: Uint32Array;
   scheme: 'nest' | 'ring';
   colorFrames: Uint8Array[];
   currentFrame: number;
@@ -35,7 +35,7 @@ type HealpixCellsLayerState = {
   coords: Float32Array | null;
   indexes: Uint32Array | null;
   triangles: Uint32Array | null;
-  cellVertexIndices: Float32Array | null;
+  cellVertexIndices: Uint32Array | null;
   frameTexture: Texture | null;
   cellTextureWidth: number;
   frameCount: number;
@@ -59,7 +59,7 @@ const EMPTY_RGBA_TEXEL = new Uint8Array([0, 0, 0, 0]);
 /** deck.gl-style default props for the composite layer. */
 const defaultProps: DefaultProps<_HealpixCellsLayerProps> = {
   nside: { type: 'number', value: 0 },
-  cellIds: { type: 'object', value: new Int32Array(0), compare: true },
+  cellIds: { type: 'object', value: new Uint32Array(0), compare: true },
   // @ts-expect-error deck.gl DefaultProps has no 'string' type.
   scheme: { type: 'string', value: 'nest' },
   colorFrames: {
@@ -211,7 +211,7 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
     if (this._version !== v) return;
 
     const cellVertexIndices = expandArrayBuffer(
-      Float32Array.from(cellIds, (_unused, index) => index),
+      Uint32Array.from(cellIds, (_unused, index) => index),
       VERTS_PER_CELL,
       1
     );
