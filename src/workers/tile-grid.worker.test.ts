@@ -32,6 +32,6 @@ describe('tile-grid.worker', () => {
     expect(message.data.coords).toBeInstanceOf(Float32Array);
     expect(message.data.indexes).toBeInstanceOf(Uint32Array);
     expect(message.data.triangles).toBeInstanceOf(Uint32Array);
-    expect(Array.isArray(transfer)).toBe(true);
+    expect(Array.isArray(transfer.transfer)).toBe(true);
   });
 });

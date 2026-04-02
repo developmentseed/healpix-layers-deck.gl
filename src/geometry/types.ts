@@ -1,3 +1,4 @@
+import type { CellIdArray } from '../types/cell-ids';
 import type { HealpixScheme } from '../types/layer-props';
 
 /** Flat-buffer representation of geometry for a batch of HEALPix cells. */
@@ -9,7 +10,7 @@ export type GeometryResult = {
 
 export type WorkerTask = {
   nside: number;
-  cellIds: Int32Array;
+  cellIds: CellIdArray;
   scheme: HealpixScheme;
 };
 

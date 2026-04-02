@@ -3,11 +3,7 @@
  */
 import { cornersNestLonLat, cornersRingLonLat } from 'healpix-ts';
 import { earcut } from '@math.gl/polygon';
-
-declare const self: {
-  onmessage: ((ev: MessageEvent) => void) | null;
-  postMessage(message: unknown, transfer: Transferable[]): void;
-};
+import type { CellIdArray } from '../types/cell-ids';
 
 self.onmessage = (e: MessageEvent) => {
   const {
@@ -16,7 +12,7 @@ self.onmessage = (e: MessageEvent) => {
     scheme = 'nest'
   } = e.data as {
     nside: number;
-    cellIds: Int32Array;
+    cellIds: CellIdArray;
     scheme?: 'nest' | 'ring';
   };
 
@@ -28,7 +24,7 @@ self.onmessage = (e: MessageEvent) => {
   const triangles = new Uint32Array(cells * 6);
 
   for (let i = 0; i < cells; i++) {
-    const corners = cornersFn(nside, cellIds[i]);
+    const corners = cornersFn(nside, Number(cellIds[i]));
     const poly = corners.concat(corners[0]).flat();
     coords.set(poly, i * 10);
     indexes[i] = i * 5;
@@ -40,9 +36,8 @@ self.onmessage = (e: MessageEvent) => {
     );
   }
 
-  self.postMessage({ type: 'data', data: { coords, indexes, triangles } }, [
-    coords.buffer,
-    indexes.buffer,
-    triangles.buffer
-  ]);
+  self.postMessage(
+    { type: 'data', data: { coords, indexes, triangles } },
+    { transfer: [coords.buffer, indexes.buffer, triangles.buffer] }
+  );
 };

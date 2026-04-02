@@ -14,8 +14,9 @@
 
 import { getWorkerFactory } from '../config';
 import { WorkerPool } from '../utils/worker-pool';
-import { hashInt32Array } from '../utils/hash';
+import { hashTypedArray } from '../utils/hash';
 import type { GeometryResult, WorkerMessage, WorkerTask } from './types';
+import type { CellIdArray } from '../types/cell-ids';
 import type { HealpixScheme } from '../types/layer-props';
 
 const POOL_THRESHOLD = 10_000;
@@ -42,14 +43,14 @@ const inflightGeometry = new Map<string, Promise<GeometryResult>>();
 function cacheKey(
   nside: number,
   scheme: HealpixScheme,
-  cellIds: Int32Array
+  cellIds: CellIdArray
 ): string {
-  return `${nside}:${scheme}:${cellIds.length}:${hashInt32Array(cellIds)}`;
+  return `${nside}:${scheme}:${cellIds.length}:${hashTypedArray(cellIds)}`;
 }
 
 export async function computeGeometry(
   nside: number,
-  cellIds: Int32Array,
+  cellIds: CellIdArray,
   scheme: HealpixScheme
 ): Promise<GeometryResult> {
   const key = cacheKey(nside, scheme, cellIds);
@@ -84,7 +85,7 @@ export async function computeGeometry(
 
 async function computeUncached(
   nside: number,
-  cellIds: Int32Array,
+  cellIds: CellIdArray,
   scheme: HealpixScheme
 ): Promise<GeometryResult> {
   if (cellIds.length < POOL_THRESHOLD) {

@@ -18,13 +18,14 @@ import type { Texture } from '@luma.gl/core';
 import { expandArrayBuffer } from '../utils/array-buffer';
 import { computeGeometry } from '../geometry/compute-geometry';
 import { VERTS_PER_CELL } from '../types/layer-props';
+import type { CellIdArray } from '../types/cell-ids';
 import type { HealpixCellsLayerProps } from '../types/layer-props';
 import { HEALPIX_COLOR_FRAMES_EXTENSION } from '../extensions/healpix-color-frames-extension';
 
 /** Internal prop subset used by default prop declarations. */
 type _HealpixCellsLayerProps = {
   nside: number;
-  cellIds: Uint32Array;
+  cellIds: CellIdArray;
   scheme: 'nest' | 'ring';
   colorFrames: Uint8Array[];
   currentFrame: number;
@@ -211,7 +212,7 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
     if (this._version !== v) return;
 
     const cellVertexIndices = expandArrayBuffer(
-      Uint32Array.from(cellIds, (_unused, index) => index),
+      Uint32Array.from({ length: cellIds.length }, (_unused, index) => index),
       VERTS_PER_CELL,
       1
     );
