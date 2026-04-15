@@ -18,8 +18,6 @@ import { healpixCellsShaderModule } from '../shaders/healpix-cells-shader-module
 export type HealpixCellsPrimitiveLayerProps = {
   nside: number;
   scheme: 'nest' | 'ring';
-  cellIdLo: Uint32Array;
-  cellIdHi: Uint32Array;
   instanceCount: number;
 };
 
@@ -32,16 +30,6 @@ const defaultProps: DefaultProps<_HealpixCellsPrimitiveLayerProps> = {
   nside: { type: 'number', value: 1 },
   // @ts-expect-error deck.gl DefaultProps has no 'string' type for scheme.
   scheme: { type: 'string', value: 'nest' },
-  cellIdLo: {
-    type: 'object',
-    value: new Uint32Array(0),
-    compare: true
-  },
-  cellIdHi: {
-    type: 'object',
-    value: new Uint32Array(0),
-    compare: true
-  },
   instanceCount: { type: 'number', value: 0 }
 };
 
@@ -69,22 +57,8 @@ export class HealpixCellsPrimitiveLayer extends Layer<HealpixCellsPrimitiveLayer
 
   initializeState(_context: LayerContext): void {
     this.getAttributeManager()!.addInstanced({
-      cellIdLo: {
-        size: 1,
-        type: 'uint32',
-        noAlloc: true,
-        update: (attribute) => {
-          attribute.value = this.props.cellIdLo ?? new Uint32Array(0);
-        }
-      },
-      cellIdHi: {
-        size: 1,
-        type: 'uint32',
-        noAlloc: true,
-        update: (attribute) => {
-          attribute.value = this.props.cellIdHi ?? new Uint32Array(0);
-        }
-      }
+      cellIdLo: { size: 1, type: 'uint32', noAlloc: true },
+      cellIdHi: { size: 1, type: 'uint32', noAlloc: true }
     });
   }
 

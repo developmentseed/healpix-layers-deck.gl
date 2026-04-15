@@ -360,37 +360,36 @@ uvec2 ring_to_nest(uint idLo, uint idHi, uint nside) {
 }
 
 // ===========================================================================
-// fxy2tu — face coordinates (f, ix, iy) → HEALPix projection (t, u)
-// Returns vec4(t.hi, t.lo, u.hi, u.lo) — two fp64 values packed.
+// fxy2ki — face coordinates (f, ix, iy) → integer diagonal coords (k, i).
+// Returns ivec2(k, i).  These are the exact integer numerators in
+//   t = (k / nside) · π/4,   u = π/2 − (i / nside) · π/4
 // ===========================================================================
-// Constants in fp64
-const float PI    = 3.14159265358979323846;
 const float PI_4  = 0.78539816339744830962;   // π/4
-const float PI_2  = 1.57079632679489661923;   // π/2
 
-vec4 fxy2tu(int f, int ix, int iy, uint nside) {
-  // f_row = f / 4  (integer division)
+ivec2 fxy2ki(int f, int ix, int iy, uint nside) {
   int f_row = f / 4;
   int f1    = f_row + 2;
   int f2    = 2 * (f % 4) - (f_row % 2) + 1;
 
-  int v = ix + iy;        // south-pointing diagonal
-  int h = ix - iy;        // east-pointing diagonal
+  int v = ix + iy;
+  int h = ix - iy;
 
-  // i = f1 * nside - v - 1   (ring index, exact integer)
-  // k = f2 * nside + h + 8 * nside  (horizontal index, exact integer)
   int i_int = f1 * int(nside) - v - 1;
   int k_int = f2 * int(nside) + h + 8 * int(nside);
 
-  // t = (k / nside) * PI/4  in fp64
-  // u = PI/2 - (i / nside) * PI/4  in fp64
-  vec2 k_f64 = f64_from(float(k_int));
-  vec2 n_f64 = f64_from(float(nside));
-  vec2 t     = f64_mul(f64_div(k_f64, n_f64), vec2(PI_4, 0.0));
+  return ivec2(k_int, i_int);
+}
 
-  vec2 i_f64 = f64_from(float(i_int));
-  vec2 u     = f64_sub(vec2(PI_2, 0.0),
-                 f64_mul(f64_div(i_f64, n_f64), vec2(PI_4, 0.0)));
+// ===========================================================================
+// ki2tu — integer diagonal coords (k, i) → fp64 projection coords (t, u).
+// Returns vec4(t.hi, t.lo, u.hi, u.lo).
+// ===========================================================================
+vec4 ki2tu(int k_int, int i_int, uint nside) {
+  vec2 n_f64 = f64_from(float(nside));
+
+  vec2 t = f64_mul(f64_div(f64_from(float(k_int)), n_f64), vec2(PI_4, 0.0));
+  vec2 u = f64_sub(vec2(PI_2, 0.0),
+             f64_mul(f64_div(f64_from(float(i_int)), n_f64), vec2(PI_4, 0.0)));
 
   return vec4(t, u);
 }
@@ -417,26 +416,27 @@ vec4 tu2za(vec2 t, vec2 u) {
     return vec4(z, t);
   } else {
     // Polar caps.
-    // t_t = t mod (π/2)  — use float32 for the modulo (no precision issue here
-    // since t is already in [0, 2π) range after the offset, and we only need
-    // t_t for the a computation where it is differenced with π/4).
-    float t_hi  = t.x;
-    float t_t_f = t_hi - PI_2 * floor(t_hi / PI_2);  // t mod (π/2), in [0, π/2)
+    // t_t = t mod (π/2) — computed in fp64 to avoid the precision loss that
+    // occurs when large t values (~12) are reduced in float32.  The ratio
+    // multiplier grows as O(nside) near the poles, amplifying any error in
+    // (t_t − π/4) into visible gaps between cells.
+    float n_periods = floor(t.x / PI_2);
+    vec2 t_t = f64_sub(t, f64_mul(vec2(PI_2, 0.0), f64_from(n_periods)));
 
     // a = t - ((abs_u - π/4) / (abs_u - π/2)) * (t_t - π/4)
-    // Keep the ratio in fp64 for precision.
-    vec2 num = f64_sub(vec2(abs_u, 0.0), vec2(PI_4, 0.0));
-    vec2 den = f64_sub(vec2(abs_u, 0.0), vec2(PI_2, 0.0));
+    vec2 abs_u_f64 = vec2(abs_u, u.y * sign_u);
+    vec2 num = f64_sub(abs_u_f64, vec2(PI_4, 0.0));
+    vec2 den = f64_sub(abs_u_f64, vec2(PI_2, 0.0));
     vec2 ratio = f64_div(num, den);
-    vec2 tt_off = vec2(t_t_f - PI_4, 0.0);
+    vec2 tt_off = f64_sub(t_t, vec2(PI_4, 0.0));
     vec2 a = f64_sub(t, f64_mul(ratio, tt_off));
 
-    // sigma = 4 * abs_u / π
-    float sigma_f = 4.0 * abs_u / PI;
-    // z = sign(u) * (1 - (1/3) * (2 - sigma)^2)
-    float two_minus_sigma = 2.0 - sigma_f;
-    float z_f = sign_u * (1.0 - (1.0 / 3.0) * two_minus_sigma * two_minus_sigma);
-    vec2 z = vec2(z_f, 0.0);
+    // sigma = 4 * |u| / π  — fp64 for latitude precision near the poles.
+    vec2 sigma = f64_div(f64_mul(vec2(4.0, 0.0), abs_u_f64), vec2(PI, 0.0));
+    vec2 two_minus_sigma = f64_sub(vec2(2.0, 0.0), sigma);
+    vec2 tms2 = f64_mul(two_minus_sigma, two_minus_sigma);
+    vec2 z = f64_mul(vec2(sign_u, 0.0),
+               f64_sub(vec2(1.0, 0.0), f64_mul(vec2(1.0 / 3.0, 0.0), tms2)));
 
     return vec4(z, a);
   }
@@ -474,24 +474,24 @@ void main() {
   int iy = xyf.z;
 
   // -------------------------------------------------------------------------
-  // Face coords → (t, u) projection, in fp64.
+  // Face coords → integer diagonal coords (k, i), then apply corner offset
+  // as integer ±1 so that adjacent cells sharing a corner compute it from
+  // the SAME (k, i) pair — guaranteeing bit-identical fp64 results.
   // -------------------------------------------------------------------------
-  vec4 tu = fxy2tu(f, ix, iy, healpixCells.nside);
-  vec2 t  = tu.xy;
-  vec2 u  = tu.zw;
+  ivec2 ki = fxy2ki(f, ix, iy, healpixCells.nside);
 
-  // -------------------------------------------------------------------------
-  // Apply corner offset: d = π / (4 * nside)
-  // Corners [N, W, S, E]: dt = [0, -d, 0, +d], du = [+d, 0, -d, 0]
-  // -------------------------------------------------------------------------
-  float d = PI / (4.0 * float(healpixCells.nside));
+  // Corner offsets in integer (k, i) space: [N, W, S, E]
+  //   dt = [0, -1, 0, +1]  →  dk (horizontal)
+  //   du = [+1, 0, -1, 0]  →  di = -du (u increases when i decreases)
+  const int DK[4] = int[4]( 0, -1,  0, +1);
+  const int DI[4] = int[4](-1,  0, +1,  0);
 
-  // Corner offsets as compile-time arrays (GLSL ES 3.00 supports const arrays).
-  const float DT[4] = float[4]( 0.0, -1.0,  0.0, +1.0);
-  const float DU[4] = float[4](+1.0,  0.0, -1.0,  0.0);
+  int k_corner = ki.x + DK[cornerIdx];
+  int i_corner = ki.y + DI[cornerIdx];
 
-  vec2 t_corner = f64_add(t, vec2(DT[cornerIdx] * d, 0.0));
-  vec2 u_corner = f64_add(u, vec2(DU[cornerIdx] * d, 0.0));
+  vec4 tu_corner = ki2tu(k_corner, i_corner, healpixCells.nside);
+  vec2 t_corner  = tu_corner.xy;
+  vec2 u_corner  = tu_corner.zw;
 
   // -------------------------------------------------------------------------
   // Inverse projection: (t, u) → (z, a).
@@ -501,22 +501,42 @@ void main() {
   vec2 a   = za.zw;
 
   // -------------------------------------------------------------------------
-  // Convert (z, a) → (lon_deg, lat_deg).
-  // Use float32 asin for the final degree conversion (precision is sufficient).
+  // Convert (z, a) → (lon_deg, lat_deg) in fp64.
+  //
+  // Longitude: multiply fp64 radian pair by (180/π) to get degrees.
+  // The lo word carries the sub-float32-ULP residual needed by project_position.
   // -------------------------------------------------------------------------
-  float lat_deg = degrees(asin(clamp(z.x, -1.0, 1.0)));
+  const float DEG_PER_RAD = 57.29577951308232;  // 180 / π
 
-  float lon_rad = a.x;  // use hi word of fp64 longitude
-  float lon_deg = degrees(lon_rad);
-  // Normalize longitude to (-180, 180].
-  lon_deg = lon_deg - 360.0 * floor((lon_deg + 180.0) / 360.0);
+  // fp64 lon in degrees
+  vec2 lon_deg_f64 = f64_mul(a, vec2(DEG_PER_RAD, 0.0));
+
+  // Normalize longitude hi word to (-180, 180] — keep lo word unchanged.
+  float lon_hi = lon_deg_f64.x;
+  float lon_wrap = 360.0 * floor((lon_hi + 180.0) / 360.0);
+  lon_hi -= lon_wrap;
+  vec2 lon_f64 = vec2(lon_hi, lon_deg_f64.y);
+
+  // fp64 latitude in degrees.
+  // asin(z_hi) gives the float32 result; the fp64 correction is:
+  //   asin(z_hi + z_lo) ≈ asin(z_hi) + z_lo / sqrt(1 - z_hi²)
+  // i.e. z_lo scaled by the asin derivative (1/cos(lat)).
+  float z_hi = clamp(z.x, -1.0, 1.0);
+  float lat_rad_hi = asin(z_hi);
+  float cos_lat = sqrt(max(1.0 - z_hi * z_hi, 1e-12));
+  float lat_rad_lo = z.y / cos_lat;
+  vec2 lat_deg_f64 = f64_mul(vec2(lat_rad_hi, lat_rad_lo), vec2(DEG_PER_RAD, 0.0));
 
   // -------------------------------------------------------------------------
-  // Pass to deck.gl projection pipeline.
+  // Pass to deck.gl projection pipeline using the fp64 two-argument overload:
+  //   project_position(vec4 position, vec3 position64Low)
+  // This preserves sub-float32 precision for high nside (e.g. 262144) where
+  // cell corners are ~3.5e-5° apart and float32 ULP at lon≈180° is ~2e-5°.
   // -------------------------------------------------------------------------
-  vec4 position = vec4(lon_deg, lat_deg, 0.0, 1.0);
+  vec4 position = vec4(lon_f64.x, lat_deg_f64.x, 0.0, 1.0);
   geometry.position = position;
-  gl_Position = project_common_position_to_clipspace(project_position(position));
+  vec4 projected = project_position(position, vec3(lon_f64.y, lat_deg_f64.y, 0.0));
+  gl_Position = project_common_position_to_clipspace(projected);
 
   vColor = vec4(1.0);
   DECKGL_FILTER_COLOR(vColor, geometry);

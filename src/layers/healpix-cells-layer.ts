@@ -131,9 +131,14 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
           id: 'cells',
           nside,
           scheme,
-          cellIdLo,
-          cellIdHi,
           instanceCount: count,
+          data: {
+            length: count,
+            attributes: {
+              cellIdLo: { value: cellIdLo, size: 1 },
+              cellIdHi: { value: cellIdHi, size: 1 }
+            }
+          },
           frameTexture,
           frameIndex,
           cellTextureWidth,
