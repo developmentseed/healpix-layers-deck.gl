@@ -17,7 +17,7 @@ export type HealpixColorExtensionProps = LayerProps & {
  * Declares the two texture samplers used for color computation.
  */
 const VERTEX_DECLARATION_INJECT = `
-uniform mediump sampler2D healpixValuesTexture;
+uniform highp sampler2D healpixValuesTexture;
 uniform mediump sampler2D healpixColorMapTexture;
 `;
 
@@ -39,19 +39,16 @@ int healpixX = healpixCell % healpixColor.uValuesWidth;
 int healpixY = healpixCell / healpixColor.uValuesWidth;
 vec4 healpixVals = texelFetch(healpixValuesTexture, ivec2(healpixX, healpixY), 0);
 
+float healpixDenom = healpixColor.uMax - healpixColor.uMin;
+float healpixT = healpixDenom == 0.0
+  ? 0.0
+  : clamp((healpixVals.r - healpixColor.uMin) / healpixDenom, 0.0, 1.0);
+
 vec4 healpixOut;
 if (healpixColor.uDimensions == 1) {
-  float t = clamp(
-    (healpixVals.r - healpixColor.uMin) / (healpixColor.uMax - healpixColor.uMin),
-    0.0, 1.0
-  );
-  healpixOut = texelFetch(healpixColorMapTexture, ivec2(int(t * 255.0), 0), 0);
+  healpixOut = texelFetch(healpixColorMapTexture, ivec2(int(healpixT * 255.0), 0), 0);
 } else if (healpixColor.uDimensions == 2) {
-  float t = clamp(
-    (healpixVals.r - healpixColor.uMin) / (healpixColor.uMax - healpixColor.uMin),
-    0.0, 1.0
-  );
-  healpixOut = texelFetch(healpixColorMapTexture, ivec2(int(t * 255.0), 0), 0);
+  healpixOut = texelFetch(healpixColorMapTexture, ivec2(int(healpixT * 255.0), 0), 0);
   healpixOut.a *= healpixVals.g;
 } else if (healpixColor.uDimensions == 3) {
   healpixOut = vec4(healpixVals.rgb, 1.0);
