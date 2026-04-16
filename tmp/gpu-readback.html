@@ -1,0 +1,398 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>HEALPix GPU readback</title>
+  <style>
+    body  { font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; padding: 1rem; background: #111; color: #ddd; }
+    h1    { font: 600 14px/1 ui-sans-serif, system-ui; margin: 0 0 1rem; }
+    pre   { white-space: pre; }
+    .ok   { color: #8fce8f; }
+    .warn { color: #e0b341; }
+    .bad  { color: #e07070; }
+    .mute { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>HEALPix GPU readback — Lisbon cell, nside=262144, id=228532280344</h1>
+  <pre id="out">running…</pre>
+  <canvas id="c" width="1" height="1" style="display:none"></canvas>
+
+<script type="module">
+//
+// Goal: run the exact same Dekker + HEALPix math that the production vertex
+// shader runs, capture lon_hi / lon_lo / lat_hi / lat_lo via transform feedback,
+// and diff against the known-truth fp32 values.
+//
+
+// ---------------------------------------------------------------------------
+// Known-truth values (from tmp/compute-truth.mjs using fxy2tu → ±d cardinal
+// offset → tu2za → asin — i.e. the same operation healpix-ts fxyCorners does
+// and that the reference PathLayer renders).
+// Input: nside=262144, cell=228532280344 → (f=3, x=227300, y=18594)
+// Shader ci mapping with integer-lattice (cx, cy) and no -1 in i_ring:
+//   ci=0 → N corner (Δt, Δu) = (0, +d)
+//   ci=1 → W corner (Δt, Δu) = (-d, 0)
+//   ci=2 → S corner (Δt, Δu) = (0, -d)
+//   ci=3 → E corner (Δt, Δu) = (+d, 0)
+// ---------------------------------------------------------------------------
+const TRUTH = [
+  // ci=0 (N)
+  { lon: -9.17324066162109, lat: 38.70757759418942 },
+  // ci=1 (W)
+  { lon: -9.17341232299805, lat: 38.70739086907931 },
+  // ci=2 (S)
+  { lon: -9.17324066162109, lat: 38.70720414445685 },
+  // ci=3 (E)
+  { lon: -9.17306900024414, lat: 38.70739086907931 }
+];
+
+// faceIx = (f << 24) | x, instIy = y — from decomposeCellIds.ts
+const FACE_IX = ((3 << 24) >>> 0) | 227300;  // 0x030377e4
+const INST_IY = 18594;                        // 0x000048a2
+const NSIDE   = 262144;
+
+// ---------------------------------------------------------------------------
+// Vertex shader — mirrors production healpix-corners.glsl.ts up through the
+// lon/lat fp64 computation, then emits vDebug instead of calling deck.gl.
+// No project32 / healpixCells UBO dependency — uses `uniform int u_nside`.
+// ---------------------------------------------------------------------------
+const VS = `#version 300 es
+precision highp float;
+precision highp int;
+
+uniform int u_nside;
+in uint faceIx;
+in uint instIy;
+flat out vec4 vDebug;  // lon_hi, lon_lo, lat_hi, lat_lo
+
+// Bitcast barrier: prevents the GLSL optimizer from algebraically simplifying
+// Dekker primitives (which depend on strict fp32 rounding) to return lo = 0.
+float _seal(float x) { return uintBitsToFloat(floatBitsToUint(x)); }
+
+vec2 _split(float a) {
+  const float SPLIT = 4097.0;
+  float t = _seal(a * SPLIT);
+  float hi = t - (t - a);
+  float lo = a - hi;
+  return vec2(hi, lo);
+}
+vec2 _twoSum(float a, float b) {
+  float s  = _seal(a + b);
+  float bb = _seal(s - a);
+  float err = (a - (s - bb)) + (b - bb);
+  return vec2(s, err);
+}
+vec2 _qts(float a, float b) {
+  float s = _seal(a + b);
+  float err = b - (s - a);
+  return vec2(s, err);
+}
+vec2 _twoProd(float a, float b) {
+  float p = _seal(a * b);
+  vec2 ap = _split(a);
+  vec2 bp = _split(b);
+  float err = ((ap.x * bp.x - p) + ap.x * bp.y + ap.y * bp.x) + ap.y * bp.y;
+  return vec2(p, err);
+}
+vec2 _add64(vec2 a, vec2 b) {
+  vec2 s = _twoSum(a.x, b.x);
+  vec2 t = _twoSum(a.y, b.y);
+  s.y += t.x;
+  s = _qts(s.x, s.y);
+  s.y += t.y;
+  return _qts(s.x, s.y);
+}
+vec2 _sub64(vec2 a, vec2 b) { return _add64(a, vec2(-b.x, -b.y)); }
+vec2 _mul64(vec2 a, vec2 b) {
+  vec2 p = _twoProd(a.x, b.x);
+  p.y += a.x * b.y + a.y * b.x;
+  return _qts(p.x, p.y);
+}
+vec2 _div64(vec2 a, vec2 b) {
+  float xn = 1.0 / b.x;
+  vec2 yn  = a * xn;
+  float diff = _sub64(a, _mul64(b, yn)).x;
+  vec2 corr  = _twoProd(xn, diff);
+  return _add64(yn, corr);
+}
+vec2 _mul64f(vec2 a, float b) { return _mul64(a, vec2(b, 0.0)); }
+
+const vec2 PI64   = vec2( 3.1415927,  -8.742278e-8 );
+const vec2 PI2_64 = vec2( 1.5707964,  -4.371139e-8 );
+const vec2 PI4_64 = vec2( 0.78539819, -2.1855695e-8);
+
+void main() {
+  int face = int(faceIx >> 24u);
+  int ix   = int(faceIx & 0xFFFFFFu);
+  int iy   = int(instIy);
+
+  int ci = gl_VertexID % 4;
+  int cx = ix + ((ci == 0 || ci == 3) ? 1 : 0);
+  int cy = iy + ((ci == 0 || ci == 1) ? 1 : 0);
+
+  int f_row = face / 4;
+  int f1 = f_row + 2;
+  int f2 = 2 * (face - 4 * f_row) - (f_row & 1) + 1;
+  int nside = u_nside;
+
+  int i_ring = f1 * nside - cx - cy;
+  int k_ring = f2 * nside + (cx - cy) + 8 * nside;
+
+  int period = 8 * nside;
+  k_ring = k_ring - (k_ring / period) * period;
+  if (k_ring > 4 * nside) k_ring -= period;
+
+  int k_int = k_ring / nside;
+  int k_rem = k_ring - k_int * nside;
+  int i_int = i_ring / nside;
+  int i_rem = i_ring - i_int * nside;
+  float k_frac = float(k_rem) / float(nside);
+  float i_frac = float(i_rem) / float(nside);
+
+  vec2 t_fp = _mul64f(PI4_64, float(k_int));
+  t_fp      = _add64(t_fp, _mul64f(PI4_64, k_frac));
+
+  vec2 i_ang = _mul64f(PI4_64, float(i_int));
+  i_ang      = _add64(i_ang, _mul64f(PI4_64, i_frac));
+  vec2 u_fp  = _sub64(PI2_64, i_ang);
+
+  float u_hi  = u_fp.x;
+  float abs_u = abs(u_hi);
+
+  vec2 lat_rad_fp, lon_rad_fp;
+  if (abs_u >= PI2_64.x) {
+    float sgn = sign(u_hi);
+    lat_rad_fp = vec2(sgn * PI2_64.x, sgn * PI2_64.y);
+    lon_rad_fp = vec2(0.0);
+  } else if (abs_u <= PI4_64.x) {
+    vec2 three_pi  = _mul64f(PI64, 3.0);
+    vec2 k_eq      = _div64(vec2(8.0, 0.0), three_pi);
+    vec2 z_fp      = _mul64(k_eq, u_fp);
+    lon_rad_fp     = t_fp;
+
+    float z_hi     = clamp(z_fp.x, -1.0, 1.0);
+    float lat_hi_0 = _seal(asin(z_hi));
+    float cos_lat0 = cos(lat_hi_0);
+    float sin_lat0 = sin(lat_hi_0);
+    float r        = (sin_lat0 - z_hi) - z_fp.y;
+    float lat_hi   = _seal(lat_hi_0 - r / cos_lat0);
+    float sin_lat  = sin(lat_hi);
+    float cos_lat  = cos(lat_hi);
+    float r2       = (sin_lat - z_hi) - z_fp.y;
+    float lat_lo   = -r2 / cos_lat;
+    lat_rad_fp     = vec2(lat_hi, lat_lo);
+  } else {
+    // Polar cap: half-angle identity asin(1 - 2w²) = π/2 - 2·asin(w) with
+    // w = |s|/sqrt(6), then Newton-refine asin(w) to fp64 (Plan B).
+    float sgn = sign(u_hi);
+    float s   = 2.0 - 4.0 * abs_u / PI64.x;
+    const float INV_SQRT_6 = 0.40824829046386;
+    float w    = abs(s) * INV_SQRT_6;
+    float a0   = _seal(asin(w));
+    float a_hi = _seal(a0 - (sin(a0) - w) / cos(a0));
+    float a_lo = -(sin(a_hi) - w) / cos(a_hi);
+
+    vec2 delta_fp   = vec2(2.0 * a_hi, 2.0 * a_lo);
+    vec2 lat_mag_fp = _sub64(PI2_64, delta_fp);
+    lat_rad_fp      = vec2(sgn * lat_mag_fp.x, sgn * lat_mag_fp.y);
+
+    float t_hi = t_fp.x;
+    float t_t  = mod(t_hi, PI2_64.x);
+    float a_f  = t_hi - ((abs_u - PI4_64.x) / (abs_u - PI2_64.x))
+                         * (t_t - PI4_64.x);
+    lon_rad_fp = vec2(a_f, 0.0);
+  }
+
+  vec2 deg_per_rad = _div64(vec2(180.0, 0.0), PI64);
+  vec2 lat_deg_fp  = _mul64(lat_rad_fp, deg_per_rad);
+  vec2 lon_deg_fp  = _mul64(lon_rad_fp, deg_per_rad);
+
+  vDebug = vec4(lon_deg_fp.x, lon_deg_fp.y, lat_deg_fp.x, lat_deg_fp.y);
+  gl_Position = vec4(0.0, 0.0, 0.0, 1.0);  // unused; rasterizer is discarded
+  gl_PointSize = 1.0;
+}
+`;
+
+// Fragment shader needed for program link even with RASTERIZER_DISCARD enabled.
+const FS = `#version 300 es
+precision mediump float;
+out vec4 fragColor;
+void main() { fragColor = vec4(1.0); }
+`;
+
+// ---------------------------------------------------------------------------
+// WebGL2 plumbing
+// ---------------------------------------------------------------------------
+const out = document.getElementById('out');
+const gl  = document.getElementById('c').getContext('webgl2');
+if (!gl) {
+  out.textContent = 'WebGL2 not available in this browser.';
+  throw new Error('no webgl2');
+}
+
+function compile(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(sh);
+    throw new Error('shader compile failed:\n' + log + '\n\n' + src);
+  }
+  return sh;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER,   VS));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+gl.transformFeedbackVaryings(prog, ['vDebug'], gl.INTERLEAVED_ATTRIBS);
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+  throw new Error('link failed: ' + gl.getProgramInfoLog(prog));
+}
+gl.useProgram(prog);
+
+const locFaceIx = gl.getAttribLocation(prog, 'faceIx');
+const locInstIy = gl.getAttribLocation(prog, 'instIy');
+const locNside  = gl.getUniformLocation(prog, 'u_nside');
+
+// Instance attribute buffers (1 instance)
+const faceBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, faceBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Uint32Array([FACE_IX]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(locFaceIx);
+gl.vertexAttribIPointer(locFaceIx, 1, gl.UNSIGNED_INT, 0, 0);
+gl.vertexAttribDivisor(locFaceIx, 1);
+
+const iyBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, iyBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Uint32Array([INST_IY]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(locInstIy);
+gl.vertexAttribIPointer(locInstIy, 1, gl.UNSIGNED_INT, 0, 0);
+gl.vertexAttribDivisor(locInstIy, 1);
+
+gl.uniform1i(locNside, NSIDE);
+
+// Transform-feedback destination buffer: 4 verts × vec4 = 64 bytes.
+// Allocate via TRANSFORM_FEEDBACK_BUFFER target so we never conflict with
+// ARRAY_BUFFER bindings on the instance attribute buffers.
+const tfBuf = gl.createBuffer();
+gl.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, tfBuf);
+gl.bufferData(gl.TRANSFORM_FEEDBACK_BUFFER, 4 * 4 * 4, gl.STREAM_READ);
+gl.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, null);
+
+const tf = gl.createTransformFeedback();
+gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, tf);
+gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, tfBuf);
+
+// Ensure ARRAY_BUFFER slot doesn't hold tfBuf during the draw.
+gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+gl.enable(gl.RASTERIZER_DISCARD);
+gl.beginTransformFeedback(gl.POINTS);
+// 4 vertices × 1 instance — gl_VertexID will be 0..3, matching ci=0..3
+gl.drawArraysInstanced(gl.POINTS, 0, 4, 1);
+gl.endTransformFeedback();
+gl.disable(gl.RASTERIZER_DISCARD);
+
+// Detach the buffer from TRANSFORM_FEEDBACK_BUFFER slot(s) before re-reading it
+// via a generic target (GL_INVALID_OPERATION otherwise).
+gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
+gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null);
+
+const result = new Float32Array(16);
+gl.bindBuffer(gl.COPY_READ_BUFFER, tfBuf);
+gl.getBufferSubData(gl.COPY_READ_BUFFER, 0, result);
+gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+
+// ---------------------------------------------------------------------------
+// Format and diff
+// ---------------------------------------------------------------------------
+function fp32(x) { return Math.fround(x); }
+
+// fp32 ULP at |x| (distance to next representable fp32 float)
+function ulp32(x) {
+  const ax = Math.abs(Math.fround(x));
+  if (ax === 0) return Math.pow(2, -149);
+  const buf = new ArrayBuffer(4);
+  const f32 = new Float32Array(buf);
+  const u32 = new Uint32Array(buf);
+  f32[0] = ax;
+  u32[0] += 1;
+  return f32[0] - ax;
+}
+
+function fmt(x, pad = 22) {
+  if (x === 0) return '0'.padEnd(pad);
+  const s = (x >= 0 ? ' ' : '') + x.toExponential(6);
+  return s.padEnd(pad);
+}
+
+function diffClass(ulps) {
+  if (ulps <= 0.51) return 'ok';
+  if (ulps <= 4.01) return 'warn';
+  return 'bad';
+}
+
+const labels = ['N (ci=0)', 'W (ci=1)', 'S (ci=2)', 'E (ci=3)'];
+let html = '';
+
+html += 'Per-corner GPU readback vs CPU truth\n';
+html += '─'.repeat(112) + '\n';
+
+for (let i = 0; i < 4; i++) {
+  const [lonHi, lonLo, latHi, latLo] = result.slice(i * 4, i * 4 + 4);
+  const t = TRUTH[i];
+  const expLonHi = fp32(t.lon);
+  const expLonLo = t.lon - expLonHi;
+  const expLatHi = fp32(t.lat);
+  const expLatLo = t.lat - expLatHi;
+
+  const lonHiErr = lonHi - expLonHi;
+  const lonLoErr = lonLo - expLonLo;
+  const latHiErr = latHi - expLatHi;
+  const latLoErr = latLo - expLatLo;
+
+  const lonUlp = ulp32(expLonHi);
+  const latUlp = ulp32(expLatHi);
+
+  html += `\n<b>${labels[i]}</b>\n`;
+  html += `  lon truth=${t.lon.toFixed(14)}°   fp32=${expLonHi.toFixed(14)}   lo=${expLonLo.toExponential(3)}\n`;
+  html += `  lat truth=${t.lat.toFixed(14)}°   fp32=${expLatHi.toFixed(14)}   lo=${expLatLo.toExponential(3)}\n`;
+  html += `  fp32 ulp:  lon=${lonUlp.toExponential(3)}   lat=${latUlp.toExponential(3)}\n`;
+  html += '\n';
+  html += '  field      GPU                     expected                diff                    ulps\n';
+  html += `  lon_hi   <span class="${diffClass(Math.abs(lonHiErr)/lonUlp)}">${fmt(lonHi)}  ${fmt(expLonHi)}  ${fmt(lonHiErr)}  ${(Math.abs(lonHiErr)/lonUlp).toFixed(3)}</span>\n`;
+  html += `  lon_lo   <span class="${diffClass(Math.abs(lonLoErr)/lonUlp)}">${fmt(lonLo)}  ${fmt(expLonLo)}  ${fmt(lonLoErr)}  ${(Math.abs(lonLoErr)/lonUlp).toFixed(3)}</span>\n`;
+  html += `  lat_hi   <span class="${diffClass(Math.abs(latHiErr)/latUlp)}">${fmt(latHi)}  ${fmt(expLatHi)}  ${fmt(latHiErr)}  ${(Math.abs(latHiErr)/latUlp).toFixed(3)}</span>\n`;
+  html += `  lat_lo   <span class="${diffClass(Math.abs(latLoErr)/latUlp)}">${fmt(latLo)}  ${fmt(expLatLo)}  ${fmt(latLoErr)}  ${(Math.abs(latLoErr)/latUlp).toFixed(3)}</span>\n`;
+}
+
+// Summary: worst lat_hi error in ULPs = biggest suspect.
+let worst = { field: '', ulps: 0 };
+for (let i = 0; i < 4; i++) {
+  const [lonHi, lonLo, latHi, latLo] = result.slice(i * 4, i * 4 + 4);
+  const t = TRUTH[i];
+  const tests = [
+    { k: `ci${i}.lon_hi`, g: lonHi, e: fp32(t.lon),  u: ulp32(fp32(t.lon)) },
+    { k: `ci${i}.lon_lo`, g: lonLo, e: t.lon - fp32(t.lon), u: ulp32(fp32(t.lon)) },
+    { k: `ci${i}.lat_hi`, g: latHi, e: fp32(t.lat),  u: ulp32(fp32(t.lat)) },
+    { k: `ci${i}.lat_lo`, g: latLo, e: t.lat - fp32(t.lat), u: ulp32(fp32(t.lat)) }
+  ];
+  for (const { k, g, e, u } of tests) {
+    const ulps = Math.abs(g - e) / u;
+    if (ulps > worst.ulps) worst = { field: k, ulps };
+  }
+}
+
+html += '\n' + '─'.repeat(112) + '\n';
+html += `<b>Worst disagreement:</b> ${worst.field}  =  ${worst.ulps.toFixed(3)} fp32 ULPs\n`;
+html += '\nLegend:  ';
+html += '<span class="ok">≤0.5 ULP (bit-exact-ish)</span>   ';
+html += '<span class="warn">≤4 ULP (GLSL spec-bound)</span>   ';
+html += '<span class="bad">&gt;4 ULP (pipeline bug)</span>\n';
+
+out.innerHTML = html;
+</script>
+</body>
+</html>
