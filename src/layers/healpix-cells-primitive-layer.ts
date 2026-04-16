@@ -17,7 +17,6 @@ import { healpixCellsShaderModule } from '../shaders/healpix-cells-shader-module
 /** Props for the GPU-instanced HEALPix cell primitive layer. */
 export type HealpixCellsPrimitiveLayerProps = {
   nside: number;
-  scheme: 'nest' | 'ring';
   instanceCount: number;
 };
 
@@ -28,8 +27,6 @@ type HealpixCellsPrimitiveLayerMergedProps = _HealpixCellsPrimitiveLayerProps &
 
 const defaultProps: DefaultProps<_HealpixCellsPrimitiveLayerProps> = {
   nside: { type: 'number', value: 1 },
-  // @ts-expect-error deck.gl DefaultProps has no 'string' type for scheme.
-  scheme: { type: 'string', value: 'nest' },
   instanceCount: { type: 'number', value: 0 }
 };
 
@@ -57,8 +54,8 @@ export class HealpixCellsPrimitiveLayer extends Layer<HealpixCellsPrimitiveLayer
 
   initializeState(_context: LayerContext): void {
     this.getAttributeManager()!.addInstanced({
-      cellIdLo: { size: 1, type: 'uint32', noAlloc: true },
-      cellIdHi: { size: 1, type: 'uint32', noAlloc: true }
+      faceIx: { size: 1, type: 'uint32', noAlloc: true },
+      instIy: { size: 1, type: 'uint32', noAlloc: true }
     });
   }
 
@@ -82,8 +79,7 @@ export class HealpixCellsPrimitiveLayer extends Layer<HealpixCellsPrimitiveLayer
 
     model.shaderInputs.setProps({
       healpixCells: {
-        nside: this.props.nside,
-        scheme: this.props.scheme === 'ring' ? 1 : 0
+        nside: this.props.nside
       }
     });
     model.setInstanceCount(this.props.instanceCount);

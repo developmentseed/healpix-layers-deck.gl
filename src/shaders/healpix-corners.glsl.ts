@@ -14,8 +14,8 @@ const int jrll[12] = int[12](2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4);
 const int jpll[12] = int[12](1, 3, 5, 7, 0, 2, 4, 6, 1, 3, 5, 7);
 
 void main() {
-  int face = int(faceIx >> 18u);
-  int ix   = int(faceIx & 0x3FFFFu);
+  int face = int(faceIx >> 24u);
+  int ix   = int(faceIx & 0xFFFFFFu);
   int iy   = int(instIy);
 
   // Corner selection: index buffer [0,1,2,0,2,3] → gl_VertexID cycles 0,1,2,0,2,3

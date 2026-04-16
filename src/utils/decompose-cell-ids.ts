@@ -10,7 +10,7 @@ export type DecomposedCellIds = {
 export function decomposeCellIds(
   cellIds: CellIdArray,
   nside: number,
-  scheme: HealpixScheme,
+  scheme: HealpixScheme
 ): DecomposedCellIds {
   const n = cellIds.length;
   const faceIx = new Uint32Array(n);
@@ -19,8 +19,8 @@ export function decomposeCellIds(
 
   for (let i = 0; i < n; i++) {
     const { f, x, y } = toFxy(nside, cellIds[i]);
-    // bits [31:18] = face, bits [17:0] = ix (supports nside up to 2^18)
-    faceIx[i] = (f << 18) | x;
+    // bits [31:24] = face (0-11), bits [23:0] = ix (supports nside up to 2^24)
+    faceIx[i] = (f << 24) | x;
     iy[i] = y;
   }
 
