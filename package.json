@@ -1,6 +1,6 @@
 {
-  "name": "healpix-layers-deck.gl",
-  "version": "0.2.1",
+  "name": "healpix-layers-deck.gl-colors",
+  "version": "0.1.0",
   "description": "HEALPix (Hierarchical Equal Area isoLatitude Pixelization) implementation in Deck.gl",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

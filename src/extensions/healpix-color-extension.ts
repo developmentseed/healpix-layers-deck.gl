@@ -34,7 +34,7 @@ in float healpixCellIndex;
  *   dimensions=2  scalar (→ colorMap) + opacity multiplier (second value)
  *   dimensions=3  direct RGB in 0–1; alpha=1
  *   dimensions=4  direct RGBA in 0–1
- *   else          transparent (reserved for future band math)
+ *   else          transparent
  */
 const VERTEX_COLOR_FILTER_INJECT = `
 int healpixCell = int(healpixCellIndex + 0.5);

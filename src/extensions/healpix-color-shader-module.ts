@@ -37,6 +37,6 @@ uniform healpixColorUniforms {
     uMin: 'f32',
     uMax: 'f32',
     uDimensions: 'i32',
-    uValuesWidth: 'i32',
+    uValuesWidth: 'i32'
   }
 } as const satisfies ShaderModule<HealpixColorProps>;

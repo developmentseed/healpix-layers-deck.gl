@@ -1,16 +1,6 @@
 /**
  * HealpixCellsLayer — render arbitrary HEALPix cells by ID with GPU color
  * computation.
- *
- * This composite layer is responsible for:
- * - Resolving the effective frame from `frames[currentFrame]` merged with root
- *   props.
- * - Computing polygon geometry for the resolved cells on the CPU.
- * - Building an RGBA32F values texture and an RGBA8 colorMap texture.
- * - Smart change detection: each resource is only rebuilt when its inputs
- *   change.
- * - Rendering a `SolidPolygonLayer` sublayer that computes colors on the GPU
- *   via `HEALPIX_COLOR_EXTENSION`.
  */
 import {
   CompositeLayer,
@@ -267,7 +257,8 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
     const cellCount = cellIds.length;
     const oldTexture = this.state.valuesTexture;
 
-    const { maxTextureDimension2D: maxTextureSize } = this.context.device.limits;
+    const { maxTextureDimension2D: maxTextureSize } =
+      this.context.device.limits;
     const { data, width, height } = packValuesData(
       values,
       dimensions,

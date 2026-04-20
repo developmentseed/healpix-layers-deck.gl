@@ -1,4 +1,7 @@
-import type { HealpixCellsLayerProps, HealpixFrameObject } from '../types/layer-props';
+import type {
+  HealpixCellsLayerProps,
+  HealpixFrameObject
+} from '../types/layer-props';
 import type { CellIdArray } from '../types/cell-ids';
 import { DEFAULT_COLORMAP, validateColorMap } from './color-map';
 
@@ -62,7 +65,9 @@ export function resolveFrame(props: HealpixCellsLayerProps): ResolvedFrame {
   const colorMap = frame.colorMap ?? props.colorMap ?? DEFAULT_COLORMAP;
   validateColorMap(colorMap); // throws if wrong length
 
-  const dimensions = (frame.dimensions ?? props.dimensions ?? 1) as 1 | 2 | 3 | 4;
+  const dimensions = (frame.dimensions ??
+    props.dimensions ??
+    1) as ResolvedFrame['dimensions'];
 
   // values length check
   const expectedLen = cellIds.length * dimensions;
@@ -80,6 +85,6 @@ export function resolveFrame(props: HealpixCellsLayerProps): ResolvedFrame {
     min: frame.min ?? props.min ?? 0,
     max: frame.max ?? props.max ?? 1,
     dimensions,
-    colorMap,
+    colorMap
   };
 }
