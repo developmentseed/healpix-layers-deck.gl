@@ -8,15 +8,16 @@ import {
 } from '@deck.gl/core';
 import { Geometry, Model } from '@luma.gl/engine';
 import type { RenderPass } from '@luma.gl/core';
+import { HEALPIX_FRAGMENT_SHADER, HEALPIX_VERTEX_SHADER } from '../shaders';
 import {
-  HEALPIX_FRAGMENT_SHADER,
-  HEALPIX_VERTEX_SHADER
-} from '../shaders/healpix-corners.glsl';
-import { healpixCellsShaderModule } from '../shaders/healpix-cells-shader-module';
+  computeHealpixCellsUniforms,
+  healpixCellsShaderModule
+} from '../shaders/healpix-cells-shader-module';
 
 /** Props for the GPU-instanced HEALPix cell primitive layer. */
 export type HealpixCellsPrimitiveLayerProps = {
   nside: number;
+  scheme: 'nest' | 'ring';
   instanceCount: number;
 };
 
@@ -27,6 +28,8 @@ type HealpixCellsPrimitiveLayerMergedProps = _HealpixCellsPrimitiveLayerProps &
 
 const defaultProps: DefaultProps<_HealpixCellsPrimitiveLayerProps> = {
   nside: { type: 'number', value: 1 },
+  // @ts-expect-error deck.gl DefaultProps has no 'string' type.
+  scheme: { type: 'string', value: 'nest' },
   instanceCount: { type: 'number', value: 0 }
 };
 
@@ -54,8 +57,8 @@ export class HealpixCellsPrimitiveLayer extends Layer<HealpixCellsPrimitiveLayer
 
   initializeState(_context: LayerContext): void {
     this.getAttributeManager()!.addInstanced({
-      faceIx: { size: 1, type: 'uint32', noAlloc: true },
-      instIy: { size: 1, type: 'uint32', noAlloc: true }
+      cellIdLo: { size: 1, type: 'uint32', noAlloc: true },
+      cellIdHi: { size: 1, type: 'uint32', noAlloc: true }
     });
   }
 
@@ -78,9 +81,10 @@ export class HealpixCellsPrimitiveLayer extends Layer<HealpixCellsPrimitiveLayer
     if (!model || this.props.instanceCount === 0) return;
 
     model.shaderInputs.setProps({
-      healpixCells: {
-        nside: this.props.nside
-      }
+      healpixCells: computeHealpixCellsUniforms(
+        this.props.nside,
+        this.props.scheme
+      )
     });
     model.setInstanceCount(this.props.instanceCount);
     model.draw(renderPass);

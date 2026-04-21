@@ -2,7 +2,7 @@
  * HealpixCellsLayer — render arbitrary HEALPix cells by ID.
  *
  * This composite layer is responsible for:
- * - Decomposing cell IDs into GPU-friendly (face, ix, iy) attributes.
+ * - Splitting cell IDs into u32 low/high halves for GPU NEST/RING decode.
  * - Building a GPU texture that stores all animation frame colors.
  * - Rendering a `HealpixCellsPrimitiveLayer` sublayer that draws cells in the
  *   vertex shader and samples colors from the texture.
@@ -15,7 +15,7 @@ import {
   UpdateParameters
 } from '@deck.gl/core';
 import type { Texture } from '@luma.gl/core';
-import { decomposeCellIds } from '../utils/decompose-cell-ids';
+import { splitCellIds } from '../utils/split-cell-ids';
 import { HealpixCellsPrimitiveLayer } from './healpix-cells-primitive-layer';
 import { HEALPIX_COLOR_FRAMES_EXTENSION } from '../extensions/healpix-color-frames-extension';
 import type { CellIdArray } from '../types/cell-ids';
@@ -32,8 +32,8 @@ type _HealpixCellsLayerProps = {
 
 /** Runtime state owned by `HealpixCellsLayer`. */
 type HealpixCellsLayerState = {
-  faceIx: Uint32Array;
-  iy: Uint32Array;
+  cellIdLo: Uint32Array;
+  cellIdHi: Uint32Array;
   frameTexture: Texture | null;
   cellTextureWidth: number;
   frameCount: number;
@@ -79,13 +79,13 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
 
   initializeState(): void {
     this.setState({
-      faceIx: new Uint32Array(0),
-      iy: new Uint32Array(0),
+      cellIdLo: new Uint32Array(0),
+      cellIdHi: new Uint32Array(0),
       frameTexture: null,
       cellTextureWidth: 1,
       frameCount: 0
     });
-    this._decomposeCellIds();
+    this._splitCellIds();
     this._updateColorTexture();
   }
 
@@ -94,12 +94,8 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
   }
 
   updateState({ props, oldProps }: UpdateParameters<this>): void {
-    if (
-      props.cellIds !== oldProps.cellIds ||
-      props.nside !== oldProps.nside ||
-      props.scheme !== oldProps.scheme
-    ) {
-      this._decomposeCellIds();
+    if (props.cellIds !== oldProps.cellIds) {
+      this._splitCellIds();
     }
     if (
       props.cellIds !== oldProps.cellIds ||
@@ -114,9 +110,9 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
   }
 
   renderLayers(): Layer[] {
-    const { faceIx, iy, frameTexture, cellTextureWidth, frameCount } =
+    const { cellIdLo, cellIdHi, frameTexture, cellTextureWidth, frameCount } =
       this.state;
-    const { cellIds, nside, currentFrame } = this.props;
+    const { cellIds, nside, scheme, currentFrame } = this.props;
     const count = cellIds.length;
     if (count === 0 || !frameTexture) return [];
 
@@ -130,12 +126,13 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
         this.getSubLayerProps({
           id: 'cells',
           nside,
+          scheme,
           instanceCount: count,
           data: {
             length: count,
             attributes: {
-              faceIx: { value: faceIx, size: 1 },
-              instIy: { value: iy, size: 1 }
+              cellIdLo: { value: cellIdLo, size: 1 },
+              cellIdHi: { value: cellIdHi, size: 1 }
             }
           },
           frameTexture,
@@ -150,17 +147,17 @@ export class HealpixCellsLayer extends CompositeLayer<HealpixCellsLayerProps> {
     ];
   }
 
-  private _decomposeCellIds(): void {
-    const { cellIds, nside, scheme } = this.props;
+  private _splitCellIds(): void {
+    const { cellIds } = this.props;
     if (!cellIds?.length) {
       this.setState({
-        faceIx: new Uint32Array(0),
-        iy: new Uint32Array(0)
+        cellIdLo: new Uint32Array(0),
+        cellIdHi: new Uint32Array(0)
       });
       return;
     }
-    const { faceIx, iy } = decomposeCellIds(cellIds, nside, scheme);
-    this.setState({ faceIx, iy });
+    const { cellIdLo, cellIdHi } = splitCellIds(cellIds);
+    this.setState({ cellIdLo, cellIdHi });
   }
 
   /**

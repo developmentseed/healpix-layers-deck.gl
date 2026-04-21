@@ -1,113 +1,25 @@
-export const HEALPIX_VERTEX_SHADER: string = /* glsl */ `\
-#version 300 es
-#define SHADER_NAME healpix-cells-vertex
-precision highp float;
-precision highp int;
-
-in uint faceIx;
-in uint instIy;
-in vec3 positions;
-
-out vec4 vColor;
-
-// ---------------------------------------------------------------------------
-// Inline Dekker / double-single arithmetic (no external module dependency).
-// Each "fp64" value is a vec2 (hi, lo) with hi = rounded fp32 and lo = residual.
-//
-// CRITICAL: Dekker primitives depend on strict fp32 round-to-nearest semantics.
-// The GLSL optimizer can (and WILL) algebraically simplify these to return
-// lo = 0, e.g. _twoSum: err = (a - (s - bb)) + (b - bb) with bb = s - a
-// algebraically reduces to (a - a) + 0 = 0. Empirically measured on WebGL2:
-// without barriers, every Dekker lo came back as 0 on the polar branch.
-//
-// Fix: round-trip the load-bearing intermediate through uintBitsToFloat ∘
-// floatBitsToUint. Mathematically identity, but the compiler treats the
-// bitcast as opaque, so the intermediate materializes as an honest fp32
-// value and algebraic identity-chains break.
-// ---------------------------------------------------------------------------
-float _seal(float x) { return uintBitsToFloat(floatBitsToUint(x)); }
-
-// Veltkamp split: a = hi + lo with 12-bit mantissas each
-vec2 _split(float a) {
-  const float SPLIT = 4097.0; // 2^12 + 1
-  float t = _seal(a * SPLIT);
-  float hi = t - (t - a);
-  float lo = a - hi;
-  return vec2(hi, lo);
-}
-
-// Kahan-Knuth twoSum (no ordering assumption)
-vec2 _twoSum(float a, float b) {
-  float s  = _seal(a + b);
-  float bb = _seal(s - a);
-  float err = (a - (s - bb)) + (b - bb);
-  return vec2(s, err);
-}
-
-// quickTwoSum: requires |a| >= |b|
-vec2 _qts(float a, float b) {
-  float s = _seal(a + b);
-  float err = b - (s - a);
-  return vec2(s, err);
-}
-
-// twoProd using Veltkamp splitting
-vec2 _twoProd(float a, float b) {
-  float p = _seal(a * b);
-  vec2 ap = _split(a);
-  vec2 bp = _split(b);
-  float err = ((ap.x * bp.x - p) + ap.x * bp.y + ap.y * bp.x) + ap.y * bp.y;
-  return vec2(p, err);
-}
-
-vec2 _add64(vec2 a, vec2 b) {
-  vec2 s = _twoSum(a.x, b.x);
-  vec2 t = _twoSum(a.y, b.y);
-  s.y += t.x;
-  s = _qts(s.x, s.y);
-  s.y += t.y;
-  return _qts(s.x, s.y);
-}
-
-vec2 _sub64(vec2 a, vec2 b) { return _add64(a, vec2(-b.x, -b.y)); }
-
-vec2 _mul64(vec2 a, vec2 b) {
-  vec2 p = _twoProd(a.x, b.x);
-  p.y += a.x * b.y + a.y * b.x;
-  return _qts(p.x, p.y);
-}
-
-vec2 _div64(vec2 a, vec2 b) {
-  float xn = 1.0 / b.x;
-  vec2 yn  = a * xn;                          // first approximation
-  float diff = _sub64(a, _mul64(b, yn)).x;
-  vec2 corr  = _twoProd(xn, diff);
-  return _add64(yn, corr);
-}
-
-vec2 _mul64f(vec2 a, float b) { return _mul64(a, vec2(b, 0.0)); }
-
-// fp64 constants (hi = float32(x), lo = x - float32(x))
-const vec2 PI64   = vec2( 3.1415927,  -8.742278e-8 );  // π
-const vec2 PI2_64 = vec2( 1.5707964,  -4.371139e-8 );  // π/2
-const vec2 PI4_64 = vec2( 0.78539819, -2.1855695e-8);  // π/4
-
-// ---------------------------------------------------------------------------
-void main() {
-  int face = int(faceIx >> 24u);
-  int ix   = int(faceIx & 0xFFFFFFu);
-  int iy   = int(instIy);
-
-  // Corner selection: gl_VertexID cycles 0..3 via index buffer [0,1,2,0,2,3]
-  int ci = gl_VertexID % 4;
-  int cx = ix + ((ci == 0 || ci == 3) ? 1 : 0);
-  int cy = iy + ((ci == 0 || ci == 1) ? 1 : 0);
-
+/**
+ * Corner-expansion math: (face, cx, cy, nside) → (lon_rad_fp, lat_rad_fp).
+ *
+ * Takes integer-lattice corner coordinates `(cx, cy)` = `(ix + {0,1}, iy + {0,1})`
+ * and emits the spherical lon/lat for that corner in fp64 (vec2 = (hi, lo)).
+ *
+ * Uses fxy2tu → tu2za composition. Inner branches:
+ *   - polar cap   (|u| > π/4): half-angle asin identity + Newton refinement
+ *   - equatorial  (|u| ≤ π/4): direct z = (8/3π)·u, asin + Newton refinement
+ *   - exact pole  (|u| ≥ π/2): lat = ±π/2, lon = 0
+ *
+ * Depends on fp64.glsl.ts for the Dekker primitives and π constants.
+ */
+export const HEALPIX_CORNERS_GLSL: string = /* glsl */ `
+void fxyCorner(
+  int face, int cx, int cy, int nside,
+  out vec2 lon_rad_fp, out vec2 lat_rad_fp
+) {
   // integer fxy2tu (exact)
   int f_row = face / 4;
   int f1 = f_row + 2;
   int f2 = 2 * (face - 4 * f_row) - (f_row & 1) + 1;
-  int nside = int(healpixCells.nside);
 
   // Intentionally omits the -1 that healpix-ts fxy2tu has. fxy2tu returns the
   // *center* of pixel (cx, cy); we want the four *corners* of pixel (ix, iy).
@@ -150,7 +62,6 @@ void main() {
   float u_hi  = u_fp.x;
   float abs_u = abs(u_hi);
 
-  vec2 lat_rad_fp, lon_rad_fp;
   if (abs_u >= PI2_64.x) {
     // Pole exactly: lat = ±π/2 with the full fp64 residual; lon = 0.
     float sgn = sign(u_hi);
@@ -232,32 +143,5 @@ void main() {
   // lon_rad is already in (-π, π] thanks to the integer k_ring wrap above,
   // so no Dekker-subtraction of 2π is needed — that step would introduce
   // cancellation noise we can't afford.
-
-  // rad -> deg in fp64
-  vec2 deg_per_rad = _div64(vec2(180.0, 0.0), PI64);
-  vec2 lat_deg_fp  = _mul64(lat_rad_fp, deg_per_rad);
-  vec2 lon_deg_fp  = _mul64(lon_rad_fp, deg_per_rad);
-
-  // Hand off to deck.gl using the fp64-aware projection entry point so that
-  // the (lon_lo, lat_lo) residuals survive the AUTO_OFFSET Mercator subtraction.
-  vec3 pos_hi = vec3(lon_deg_fp.x, lat_deg_fp.x, 0.0);
-  vec3 pos_lo = vec3(lon_deg_fp.y, lat_deg_fp.y, 0.0);
-  gl_Position = project_position_to_clipspace(pos_hi, pos_lo, vec3(0.0), geometry.position);
-
-  vColor = vec4(1.0);
-  DECKGL_FILTER_COLOR(vColor, geometry);
-}
-`;
-
-export const HEALPIX_FRAGMENT_SHADER: string = /* glsl */ `\
-#version 300 es
-precision highp float;
-
-in  vec4 vColor;
-out vec4 fragColor;
-
-void main() {
-  fragColor = vColor;
-  DECKGL_FILTER_COLOR(fragColor, geometry);
 }
 `;
