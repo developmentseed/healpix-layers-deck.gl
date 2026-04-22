@@ -27,3 +27,6 @@ yarn-error.log*
 
 # Worktrees
 .worktrees/
+
+# Auto-generated for GPU readback tests (`npm run gen:gpu-shaders`)
+test/gpu/shader-chunks.gen.mjs

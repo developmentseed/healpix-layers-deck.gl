@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>HEALPix GPU readback — RING</title>
+  <style>
+    body  { font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; padding: 1rem; background: #111; color: #ddd; }
+    h1    { font: 600 14px/1 ui-sans-serif, system-ui; margin: 0 0 1rem; }
+    pre   { white-space: pre; }
+    .ok   { color: #8fce8f; }
+    .warn { color: #e0b341; }
+    .bad  { color: #e07070; }
+    .mute { color: #888; }
+    h2    { font: 600 12px/1 ui-sans-serif; margin: 1.25rem 0 0.5rem; color: #9cf; }
+  </style>
+</head>
+<body>
+  <h1>HEALPix GPU readback — RING cells, nside=262144</h1>
+  <pre id="out">running…</pre>
+  <canvas id="c" width="1" height="1" style="display:none"></canvas>
+
+<script type="module">
+import {
+  INT64_GLSL,
+  FP64_GLSL,
+  HEALPIX_DECOMPOSE_GLSL,
+  HEALPIX_CORNERS_GLSL
+} from './shader-chunks.gen.mjs';
+import {
+  READBACK_FS,
+  buildReadbackVS,
+  linkTfProgram,
+  setReadbackUniforms,
+  runReadback,
+  formatDecodeCheck,
+  formatCornerDiff
+} from './readback-common.mjs';
+
+const NSIDE = 262144;
+const SCHEME = 1;
+
+const CASES = [
+  {
+    label: 'RING north cap',
+    cellId: 68719214592,
+    cellIdLo: 4294705152,
+    cellIdHi: 15,
+    expected: { face: 3, ix: 222472, iy: 116452 },
+    truth: [
+      { lon: -19.261714914599395, lat: 56.443025755521965 },
+      { lon: -19.26209653490713, lat: 56.44283936188415 },
+      { lon: -19.26199261992616, lat: 56.4426529681549 },
+      { lon: -19.261611001116762, lat: 56.44283936188415 }
+    ]
+  },
+  {
+    label: 'RING equatorial',
+    cellId: 320690379491,
+    cellIdLo: 2862799587,
+    cellIdHi: 74,
+    expected: { face: 7, ix: 99726, iy: 249799 },
+    truth: [
+      { lon: -115.76173782348641, lat: 12.839837486161988 },
+      { lon: -115.76190948486337, lat: 12.839688038577663 },
+      { lon: -115.76173782348641, lat: 12.83953859108219 },
+      { lon: -115.76156616210946, lat: 12.839688038577663 }
+    ]
+  },
+  {
+    label: 'RING south cap',
+    cellId: 755913981952,
+    cellIdLo: 4294705152,
+    cellIdHi: 175,
+    expected: { face: 9, ix: 71476, iy: 113887 },
+    truth: [
+      { lon: 124.70412429530926, lat: -56.44246657433427 },
+      { lon: 124.70382598562826, lat: -56.442652968154896 },
+      { lon: 124.70401320651911, lat: -56.442839361884154 },
+      { lon: 124.70431151679938, lat: -56.442652968154896 }
+    ]
+  }
+];
+
+const out = document.getElementById('out');
+const gl = document.getElementById('c').getContext('webgl2');
+if (!gl) {
+  out.textContent = 'WebGL2 not available in this browser.';
+  throw new Error('no webgl2');
+}
+
+const vs = buildReadbackVS(
+  INT64_GLSL,
+  FP64_GLSL,
+  HEALPIX_DECOMPOSE_GLSL,
+  HEALPIX_CORNERS_GLSL
+);
+const prog = linkTfProgram(gl, vs, READBACK_FS);
+setReadbackUniforms(gl, prog, NSIDE, SCHEME);
+
+let html = '';
+for (const c of CASES) {
+  html += `<h2>${c.label}</h2>\n`;
+  html += `<span class="mute">cellId=${c.cellId}  lo=${c.cellIdLo}  hi=${c.cellIdHi}</span>\n`;
+  const { decode, corner } = runReadback(gl, prog, c.cellIdLo, c.cellIdHi);
+  const { html: decHtml, decodeOk } = formatDecodeCheck(
+    decode,
+    c.expected.face,
+    c.expected.ix,
+    c.expected.iy
+  );
+  html += decHtml;
+  if (!decodeOk) {
+    html += '\n<span class="bad">Decode mismatch — corner diffs may be meaningless.</span>\n';
+  }
+  html += formatCornerDiff(corner, c.truth);
+}
+
+out.innerHTML = html;
+</script>
+</body>
+</html>

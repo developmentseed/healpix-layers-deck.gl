@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>HEALPix GPU readback — NEST polar</title>
+  <style>
+    body  { font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; padding: 1rem; background: #111; color: #ddd; }
+    h1    { font: 600 14px/1 ui-sans-serif, system-ui; margin: 0 0 1rem; }
+    pre   { white-space: pre; }
+    .ok   { color: #8fce8f; }
+    .warn { color: #e0b341; }
+    .bad  { color: #e07070; }
+  </style>
+</head>
+<body>
+  <h1>HEALPix GPU readback — POLAR cell (lat≈85°), nside=262144, NEST id=274626645138</h1>
+  <pre id="out">running…</pre>
+  <canvas id="c" width="1" height="1" style="display:none"></canvas>
+
+<script type="module">
+import {
+  INT64_GLSL,
+  FP64_GLSL,
+  HEALPIX_DECOMPOSE_GLSL,
+  HEALPIX_CORNERS_GLSL
+} from './shader-chunks.gen.mjs';
+import {
+  READBACK_FS,
+  buildReadbackVS,
+  linkTfProgram,
+  setReadbackUniforms,
+  runReadback,
+  formatDecodeCheck,
+  formatCornerDiff
+} from './readback-common.mjs';
+
+const TRUTH = [
+  { lon: -37.96981132075486, lat: 85.03283868895922 },
+  { lon: -37.97168116150375, lat: 85.03266006273074 },
+  { lon: -37.97031659898677, lat: 85.03248143649022 },
+  { lon: -37.96844677639638, lat: 85.03266006273074 }
+];
+
+const cellId = 274626645138;
+const cellIdLo = cellId >>> 0;
+const cellIdHi = Math.floor(cellId / 4294967296);
+const NSIDE = 262144;
+const SCHEME = 0;
+
+const out = document.getElementById('out');
+const gl = document.getElementById('c').getContext('webgl2');
+if (!gl) {
+  out.textContent = 'WebGL2 not available in this browser.';
+  throw new Error('no webgl2');
+}
+
+const vs = buildReadbackVS(
+  INT64_GLSL,
+  FP64_GLSL,
+  HEALPIX_DECOMPOSE_GLSL,
+  HEALPIX_CORNERS_GLSL
+);
+const prog = linkTfProgram(gl, vs, READBACK_FS);
+setReadbackUniforms(gl, prog, NSIDE, SCHEME);
+const { decode, corner } = runReadback(gl, prog, cellIdLo, cellIdHi);
+
+const EXPECTED_FACE = 3;
+const EXPECTED_IX = 250404;
+const EXPECTED_IY = 246057;
+const { html: decHtml, decodeOk } = formatDecodeCheck(
+  decode,
+  EXPECTED_FACE,
+  EXPECTED_IX,
+  EXPECTED_IY
+);
+let html = decHtml;
+if (!decodeOk) html += '\n<span class="bad">Decode mismatch — corner diffs may be meaningless.</span>\n';
+html += formatCornerDiff(corner, TRUTH);
+out.innerHTML = html;
+</script>
+</body>
+</html>
