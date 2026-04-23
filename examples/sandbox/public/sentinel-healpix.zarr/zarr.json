@@ -1,0 +1,19 @@
+{
+  "attributes": {
+    "bands": [
+      "b01",
+      "b02",
+      "b03",
+      "b04",
+      "b05",
+      "b06",
+      "b07",
+      "b8a",
+      "b11",
+      "b12"
+    ],
+    "source": "https://s3.explorer.eopf.copernicus.eu/esa-zarr-sentinel-explorer-fra/tests-output/sentinel-2-l2a-staging/S2C_MSIL2A_20260329T112111_N0512_R037_T29SMD_20260329T144222.zarr"
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}

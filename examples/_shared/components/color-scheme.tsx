@@ -45,7 +45,7 @@ export function ColorSchemeSelect(props: ColorSchemeSelectProps) {
   return (
     <Select.Root collection={schemes} value={value} onValueChange={setter}>
       <Select.HiddenSelect />
-      <Select.Label>Select color scheme</Select.Label>
+      <Select.Label>Color scheme</Select.Label>
       <Select.Control>
         <Select.Trigger>
           <Select.ValueText placeholder='Select color scheme' />

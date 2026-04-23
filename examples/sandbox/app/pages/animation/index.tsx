@@ -163,7 +163,7 @@ export default function PageAnimation() {
         <Text fontStyle='italic'>
           HEALPix cells dynamically generated
           <br />
-          <Text fontSize='sm'>
+          <Text as='span' fontSize='sm'>
             Half of the total cells for the chosen nside are generated and
             animated, shifting them over the different frames.
           </Text>
