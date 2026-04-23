@@ -1,11 +1,10 @@
 ![HEALPix Banner](./docs/healpix-banner.png)
 
 <p align='center'>
-  <a href='https://github.com/developmentseed/healpix-ts'>HEALPix Typescript</a> | <a href='https://github.com/developmentseed/healpix-layers-deck.gl'>HEALPix Deck.gl Layer</a> 
+  <a href='https://github.com/developmentseed/healpix-ts'>HEALPix Typescript</a> | <a href='https://github.com/developmentseed/deck.gl-healpix'>HEALPix Deck.gl Layer</a> 
 </p>
 
-
-# HEALPix Deck.gl Layer
+# HEALPix Deck.gl 
 
 A [deck.gl](https://deck.gl/) layer for rendering [HEALPix](https://healpix.sourceforge.io/) (Hierarchical Equal Area isoLatitude Pixelization) cells on a map.  
 It is especially suited for animating a large number of cells: per-cell values are uploaded once to the GPU and a small colorMap lookup is applied every frame on the vertex shader.
@@ -15,7 +14,7 @@ https://github.com/user-attachments/assets/4166d5d5-65e3-4309-a63a-0a2d0cdf275d
 ## Installation
 
 ```bash
-npm install healpix-layers-deck.gl
+npm install deck.gl-healpix
 ```
 
 Peer dependencies (`@deck.gl/core`, `@deck.gl/layers`) must be provided by the host application.
@@ -31,7 +30,7 @@ npm install @deck.gl/core @deck.gl/layers
 Pass per-cell numeric `values` plus a `[min, max]` range. The layer normalizes each value and maps it through a 256-entry `colorMap` LUT on the GPU. If `colorMap` is omitted a linear black-to-white ramp is used.
 
 ```ts
-import { HealpixCellsLayer } from 'healpix-layers-deck.gl';
+import { HealpixCellsLayer } from 'deck.gl-healpix';
 
 const cellIds = new Uint32Array([0, 1, 2, 3]);
 const values = new Float32Array([0.1, 0.4, 0.7, 1.0]);
@@ -51,7 +50,7 @@ const layer = new HealpixCellsLayer({
 Provide a `frames` array whose entries override the root-level defaults. Advance `currentFrame` to switch between them — no GPU re-upload happens unless the underlying typed array changes.
 
 ```ts
-import { HealpixCellsLayer } from 'healpix-layers-deck.gl';
+import { HealpixCellsLayer } from 'deck.gl-healpix';
 
 const cellIds = new Uint32Array([0, 1, 2, 3]);
 
@@ -93,7 +92,7 @@ A `colorMap` is a `Uint8Array` of exactly **256 × 4 = 1024 bytes** in RGBA orde
 The `makeColorMap` helper builds one from a callback that is invoked 256 times with the normalized position `t = i / 255` and the raw byte index `i`. Return a hex string, a `[r, g, b]`/`[r, g, b, a]` tuple in `0`–`255`, or `{ normalized: true, rgba: [...] }` in `0`–`1`.
 
 ```ts
-import { HealpixCellsLayer, makeColorMap } from 'healpix-layers-deck.gl';
+import { HealpixCellsLayer, makeColorMap } from 'deck.gl-healpix';
 
 // Red → blue gradient
 const colorMap = makeColorMap((t) => ({
@@ -163,10 +162,10 @@ type HealpixFrameObject = {
 Cell polygon geometry is computed on the CPU in a Web Worker pool. If the default worker loader does not work for your bundler you can supply a custom factory:
 
 ```ts
-import { setWorkerFactory, setWorkerUrl } from 'healpix-layers-deck.gl';
+import { setWorkerFactory, setWorkerUrl } from 'deck.gl-healpix';
 
 // Provide an explicit worker URL …
-setWorkerUrl(new URL('healpix-layers-deck.gl/worker', import.meta.url));
+setWorkerUrl(new URL('deck.gl-healpix/worker', import.meta.url));
 
 // … or supply a custom factory that returns a ready-to-use Worker instance.
 setWorkerFactory(() => new Worker(/* ... */));
@@ -177,7 +176,7 @@ setWorkerFactory(() => new Worker(/* ... */));
 Build a 256-entry RGBA colorMap (1024 bytes) from a callback.
 
 ```ts
-import { makeColorMap } from 'healpix-layers-deck.gl';
+import { makeColorMap } from 'deck.gl-healpix';
 
 const viridisLike = makeColorMap((t) => ({
   normalized: true,
@@ -202,7 +201,7 @@ import type {
   HealpixScheme,
   CellIdArray,
   ColorMapCallbackValue
-} from 'healpix-layers-deck.gl';
+} from 'deck.gl-healpix';
 ```
 
 - **`HealpixScheme`** — `'nest' | 'ring'`
@@ -213,12 +212,17 @@ import type {
 
 ## Development
 
+The published library lives in `packages/deck.gl-healpix`. The repo is an npm-workspaces + [Lerna](https://lerna.js.org/) monorepo. Shared TypeScript, Rollup, and tooling are at the root; run commands from the repo root.
+
 ```bash
 npm install
-npm run build         # one-shot build (CJS + ESM + types)
-npm run build:watch   # watch mode
-npm run lint          # ESLint
-npm test              # Jest
+npm run build         # lerna: build all packages
+npm run build:watch  # lerna: watch
+npm run ts-check     # tsc --noEmit (per package)
+npm run lint
+npm test
+# npm run versionup   # bump versions (no tag/push) before a release
+# npm run publish:from  # lerna publish from-package (not private)
 ```
 
 ## License

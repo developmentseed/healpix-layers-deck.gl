@@ -6,6 +6,14 @@ import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
 /** @type {import('eslint').Linter.Config[]} */
 export default [
   {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/.worktrees/**',
+      '**/coverage/**'
+    ]
+  },
+  {
     files: ['**/*.{js,mjs,cjs,ts}'],
     languageOptions: { ecmaVersion: 2020, globals: globals.browser }
   },

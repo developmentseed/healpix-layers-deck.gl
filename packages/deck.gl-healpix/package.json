@@ -1,0 +1,57 @@
+{
+  "name": "deck.gl-healpix",
+  "version": "0.1.0",
+  "description": "HEALPix (Hierarchical Equal Area isoLatitude Pixelization) implementation in Deck.gl",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "rollup -c ../../rollup.config.mjs",
+    "build:watch": "rollup -c ../../rollup.config.mjs --watch",
+    "test": "jest",
+    "ts-check": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "healpix",
+    "deck.gl",
+    "spherical",
+    "projection",
+    "geospatial",
+    "pixelization",
+    "sphere",
+    "coordinates",
+    "layers"
+  ],
+  "author": {
+    "name": "Daniel da Silva",
+    "email": "daniel@develpmentseed.org",
+    "url": "https://github.com/danielfdsilva"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/developmentseed/healpix-layers-deck.gl"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./worker": "./dist/tile-grid.worker.js"
+  },
+  "peerDependencies": {
+    "@deck.gl/core": "^9.2.11",
+    "@deck.gl/layers": "^9.2.11"
+  },
+  "dependencies": {
+    "healpix-ts": "^1.0.0"
+  }
+}

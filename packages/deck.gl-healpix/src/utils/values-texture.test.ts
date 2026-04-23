@@ -9,9 +9,9 @@ describe('packValuesData', () => {
     expect(height).toBe(1);
     expect(data.length).toBe(4);
     expect(data[0]).toBeCloseTo(0.5); // R
-    expect(data[1]).toBe(0);           // G
-    expect(data[2]).toBe(0);           // B
-    expect(data[3]).toBe(0);           // A
+    expect(data[1]).toBe(0); // G
+    expect(data[2]).toBe(0); // B
+    expect(data[3]).toBe(0); // A
   });
 
   it('dim=2: fills R and G, B/A are 0', () => {
