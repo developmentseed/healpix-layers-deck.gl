@@ -15,7 +15,7 @@ export type HealpixColorExtensionProps = LayerProps & {
 /**
  * GLSL declaration injected into the vertex shader.
  *
- * Declares the two texture samplers plus the per-vertex `healpixCellIndex`
+ * Declares the two texture samplers plus the instanced `healpixCellIndex`
  * attribute used to look the per-cell float values up in the values texture.
  */
 const VERTEX_DECLARATION_INJECT = `
@@ -74,16 +74,15 @@ class HealpixColorExtension extends LayerExtension {
   static extensionName = 'HealpixColorExtension';
 
   /**
-   * Register the per-vertex `healpixCellIndex` attribute expected by the
-   * shader injection. The host layer is responsible for supplying the
-   * attribute values (one per vertex).
+   * Register `healpixCellIndex` as an instanced attribute so all four quad
+   * vertices of a cell share the same index (required for instanced drawing).
    */
   initializeState(this: Layer): void {
     this.getAttributeManager()?.add({
       healpixCellIndex: {
         size: 1,
         type: 'float32',
-        stepMode: 'vertex',
+        stepMode: 'instance',
         accessor: 'healpixCellIndex',
         defaultValue: 0,
         noAlloc: true

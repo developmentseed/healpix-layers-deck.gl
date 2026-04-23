@@ -4,9 +4,6 @@ import type { CellIdArray } from './cell-ids';
 /** HEALPix pixel numbering scheme. */
 export type HealpixScheme = 'nest' | 'ring';
 
-/** Each HEALPix cell polygon = 4 corners + closing vertex = 5 vertices. */
-export const VERTS_PER_CELL = 5;
-
 export type { CellIdArray };
 
 /**

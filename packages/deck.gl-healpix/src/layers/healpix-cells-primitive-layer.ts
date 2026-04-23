@@ -13,6 +13,7 @@ import {
   computeHealpixCellsUniforms,
   healpixCellsShaderModule
 } from '../shaders/healpix-cells-shader-module';
+import type { HealpixColorExtensionProps } from '../extensions/healpix-color-extension';
 
 /** Props for the GPU-instanced HEALPix cell primitive layer. */
 export type HealpixCellsPrimitiveLayerProps = {
@@ -24,7 +25,7 @@ export type HealpixCellsPrimitiveLayerProps = {
 type _HealpixCellsPrimitiveLayerProps = HealpixCellsPrimitiveLayerProps;
 
 type HealpixCellsPrimitiveLayerMergedProps = _HealpixCellsPrimitiveLayerProps &
-  import('@deck.gl/core').LayerProps;
+  HealpixColorExtensionProps;
 
 const defaultProps: DefaultProps<_HealpixCellsPrimitiveLayerProps> = {
   nside: { type: 'number', value: 1 },
